@@ -2,6 +2,9 @@ import sys
 
 
 def main():
+    # Keep track of the shell builtins we've supported so far
+    BUILTINS = {"exit", "echo", "type"}
+
     while True:
         sys.stdout.write("$ ")
         sys.stdout.flush()
@@ -15,16 +18,24 @@ def main():
         if not command:
             continue
 
-        # Split the command into parts to separate the command name from its arguments
         parts = command.split()
         command_name = parts[0]
 
         if command_name == "exit":
             return
-            
+
         if command_name == "echo":
-            # Join all arguments after the command name with a space and print
             print(" ".join(parts[1:]))
+            continue
+
+        if command_name == "type":
+            # Ensure the user actually provided an argument to inspect
+            if len(parts) > 1:
+                target_command = parts[1]
+                if target_command in BUILTINS:
+                    print(f"{target_command} is a shell builtin")
+                else:
+                    print(f"{target_command}: not found")
             continue
 
         print(f"{command_name}: command not found")
