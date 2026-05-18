@@ -68,7 +68,8 @@ def main():
         if found_path:
             # Execute the program, passing the full path and all command arguments
             # parts[1:] contains only the arguments passed to the command
-            subprocess.run([found_path] + parts[1:])
+            #subprocess.run([found_path] + parts[1:])
+            subprocess.run([command_name] + parts[1:], executable=found_path)
             continue
 
         # Fallback if command is neither a builtin nor an external program
