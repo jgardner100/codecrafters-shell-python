@@ -21,7 +21,7 @@ def find_executable(command_name):
 
 def main():
     # Keep track of the shell builtins supported so far
-    BUILTINS = {"exit", "echo", "type"}
+    BUILTINS = {"exit", "echo", "type", "pwd"}
 
     while True:
         sys.stdout.write("$ ")
@@ -48,6 +48,12 @@ def main():
             print(" ".join(parts[1:]))
             continue
 
+        # Handle Builtin: pwd
+        if command_name == "pwd":
+            # Retrieve and print the full absolute path of the current working directory
+            print(os.getcwd())
+            continue
+
         # Handle Builtin: type
         if command_name == "type":
             if len(parts) > 1:
@@ -66,9 +72,7 @@ def main():
         # Handle External Programs
         found_path = find_executable(command_name)
         if found_path:
-            # Execute the program, passing the full path and all command arguments
-            # parts[1:] contains only the arguments passed to the command
-            #subprocess.run([found_path] + parts[1:])
+            # Pass the original command_name as Arg #0 and set the explicit executable path
             subprocess.run([command_name] + parts[1:], executable=found_path)
             continue
 
