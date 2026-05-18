@@ -57,11 +57,16 @@ def main():
         if command_name == "cd":
             if len(parts) > 1:
                 target_directory = parts[1]
+                
+                # Check if the target is the home directory shorthand
+                if target_directory == "~":
+                    target_directory = os.environ.get("HOME", "")
+                
                 # Check if the directory exists on the filesystem
                 if os.path.isdir(target_directory):
                     os.chdir(target_directory)
                 else:
-                    print(f"cd: {target_directory}: No such file or directory")
+                    print(f"cd: {parts[1]}: No such file or directory")
             continue
 
         # Handle Builtin: type
