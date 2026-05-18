@@ -1,9 +1,6 @@
 import sys
 
 
-import sys
-
-
 def main():
     while True:
         sys.stdout.write("$ ")
@@ -19,8 +16,11 @@ def main():
             continue
 
         command_name = command.split()[0]
-        print(f"{command_name}: command not found")
 
+        if command_name == "exit":
+            return
+
+        print(f"{command_name}: command not found")
 
 if __name__ == "__main__":
     main()
