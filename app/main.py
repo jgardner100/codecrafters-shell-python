@@ -21,21 +21,28 @@ def find_executable(command_name):
 
 def parse_command(command_str):
     """
-    Parses a command string into arguments, handling single quotes.
-    - Preserves spaces inside single quotes.
+    Parses a command string into arguments, handling single and double quotes.
+    - Preserves spaces inside single and double quotes.
     - Concatenates adjacent tokens (quoted or unquoted).
-    - Removes the outer single quotes.
+    - Removes the outer quote characters.
     """
     args = []
     current_arg = ""
     in_single_quotes = False
+    in_double_quotes = False
     has_chars = False  # Track if we've accumulated characters for the current argument
 
     for char in command_str:
         if in_single_quotes:
             if char == "'":
                 in_single_quotes = False
-                # Explicitly mark that we have a valid token (handles empty quotes '')
+                has_chars = True
+            else:
+                current_arg += char
+                has_chars = True
+        elif in_double_quotes:
+            if char == '"':
+                in_double_quotes = False
                 has_chars = True
             else:
                 current_arg += char
@@ -43,6 +50,8 @@ def parse_command(command_str):
         else:
             if char == "'":
                 in_single_quotes = True
+            elif char == '"':
+                in_double_quotes = True
             elif char.isspace():
                 if has_chars:
                     args.append(current_arg)
@@ -76,7 +85,7 @@ def main():
         if not command:
             continue
 
-        # Use our new custom parser instead of command.split()
+        # Use our updated custom parser
         parts = parse_command(command)
         if not parts:
             continue
