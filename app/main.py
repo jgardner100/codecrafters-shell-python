@@ -19,6 +19,46 @@ def find_executable(command_name):
     return None
 
 
+def parse_command(command_str):
+    """
+    Parses a command string into arguments, handling single quotes.
+    - Preserves spaces inside single quotes.
+    - Concatenates adjacent tokens (quoted or unquoted).
+    - Removes the outer single quotes.
+    """
+    args = []
+    current_arg = ""
+    in_single_quotes = False
+    has_chars = False  # Track if we've accumulated characters for the current argument
+
+    for char in command_str:
+        if in_single_quotes:
+            if char == "'":
+                in_single_quotes = False
+                # Explicitly mark that we have a valid token (handles empty quotes '')
+                has_chars = True
+            else:
+                current_arg += char
+                has_chars = True
+        else:
+            if char == "'":
+                in_single_quotes = True
+            elif char.isspace():
+                if has_chars:
+                    args.append(current_arg)
+                    current_arg = ""
+                    has_chars = False
+            else:
+                current_arg += char
+                has_chars = True
+
+    # Append the last argument if there is one remaining
+    if has_chars:
+        args.append(current_arg)
+
+    return args
+
+
 def main():
     # Keep track of the shell builtins supported so far
     BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
@@ -36,7 +76,11 @@ def main():
         if not command:
             continue
 
-        parts = command.split()
+        # Use our new custom parser instead of command.split()
+        parts = parse_command(command)
+        if not parts:
+            continue
+            
         command_name = parts[0]
 
         # Handle Builtin: exit
