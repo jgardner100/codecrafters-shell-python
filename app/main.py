@@ -21,19 +21,23 @@ def find_executable(command_name):
 
 def parse_command(command_str):
     """
-    Parses a command string into arguments, handling single quotes, 
-    double quotes, and backslashes outside of quotes.
+    Parses a command string into arguments, handling single quotes,
+    double quotes, and backslashes (both inside and outside double quotes).
     """
     args = []
     current_arg = ""
     in_single_quotes = False
     in_double_quotes = False
-    is_escaped = False  # Track backslash escaping state
+    is_escaped = False  # Track backslash escaping state outside quotes
     has_chars = False   # Track if we've accumulated characters for the current argument
 
-    for char in command_str:
+    # We use a while loop with an index to manually peek at the next character when needed
+    i = 0
+    while i < len(command_str):
+        char = command_str[i]
+
         if is_escaped:
-            # The character following a backslash outside quotes is treated literally
+            # Character following a backslash outside quotes is treated literally
             current_arg += char
             has_chars = True
             is_escaped = False
@@ -45,7 +49,18 @@ def parse_command(command_str):
                 current_arg += char
                 has_chars = True
         elif in_double_quotes:
-            if char == '"':
+            if char == "\\":
+                # Peek at the next character to check if it's an escapable character
+                if i + 1 < len(command_str) and command_str[i + 1] in ('"', '\\', '$', '`'):
+                    # Consume the next character literally and skip the backslash
+                    current_arg += command_str[i + 1]
+                    has_chars = True
+                    i += 1  # Skip the next character since we processed it here
+                else:
+                    # Treat the backslash literally if it doesn't precede an escapable character
+                    current_arg += char
+                    has_chars = True
+            elif char == '"':
                 in_double_quotes = False
                 has_chars = True
             else:
@@ -66,6 +81,8 @@ def parse_command(command_str):
             else:
                 current_arg += char
                 has_chars = True
+        
+        i += 1
 
     # Append the last argument if there is one remaining
     if has_chars:
