@@ -21,19 +21,23 @@ def find_executable(command_name):
 
 def parse_command(command_str):
     """
-    Parses a command string into arguments, handling single and double quotes.
-    - Preserves spaces inside single and double quotes.
-    - Concatenates adjacent tokens (quoted or unquoted).
-    - Removes the outer quote characters.
+    Parses a command string into arguments, handling single quotes, 
+    double quotes, and backslashes outside of quotes.
     """
     args = []
     current_arg = ""
     in_single_quotes = False
     in_double_quotes = False
-    has_chars = False  # Track if we've accumulated characters for the current argument
+    is_escaped = False  # Track backslash escaping state
+    has_chars = False   # Track if we've accumulated characters for the current argument
 
     for char in command_str:
-        if in_single_quotes:
+        if is_escaped:
+            # The character following a backslash outside quotes is treated literally
+            current_arg += char
+            has_chars = True
+            is_escaped = False
+        elif in_single_quotes:
             if char == "'":
                 in_single_quotes = False
                 has_chars = True
@@ -48,7 +52,9 @@ def parse_command(command_str):
                 current_arg += char
                 has_chars = True
         else:
-            if char == "'":
+            if char == "\\":
+                is_escaped = True
+            elif char == "'":
                 in_single_quotes = True
             elif char == '"':
                 in_double_quotes = True
