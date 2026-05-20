@@ -106,13 +106,19 @@ def main():
 
         # Step 2: Extract redirection configuration if present
         parts = []
-        output_file = None
+        stdout_file = None
+        stderr_file = None
         
         i = 0
         while i < len(raw_parts):
             if raw_parts[i] in (">", "1>"):
                 if i + 1 < len(raw_parts):
-                    output_file = raw_parts[i + 1]
+                    stdout_file = raw_parts[i + 1]
+                    i += 2  # Skip both the operator and the filename
+                    continue
+            elif raw_parts[i] == "2>":
+                if i + 1 < len(raw_parts):
+                    stderr_file = raw_parts[i + 1]
                     i += 2  # Skip both the operator and the filename
                     continue
             parts.append(raw_parts[i])
@@ -123,41 +129,55 @@ def main():
 
         command_name = parts[0]
 
-        # Intercept stdout if a redirection file was captured
-        original_stdout = sys.stdout
-        file_handle = None
+        # File handles for stream redirections
+        stdout_handle = None
+        stderr_handle = None
 
-        if output_file:
-            try:
-                # Open in write mode: creates file or overwrites it
-                file_handle = open(output_file, "w")
-            except Exception as e:
-                sys.stderr.write(f"shell: {output_file}: {e}\n")
-                continue
+        try:
+            if stdout_file:
+                stdout_handle = open(stdout_file, "w")
+            if stderr_file:
+                stderr_handle = open(stderr_file, "w")
+        except Exception as e:
+            sys.stderr.write(f"shell: redirection open error: {e}\n")
+            if stdout_handle: stdout_handle.close()
+            if stderr_handle: stderr_handle.close()
+            continue
 
-        # Helper to route printing seamlessly for builtins
+        # Helper to route stdout printing seamlessly for builtins
         def shell_print(*args, **kwargs):
-            if file_handle:
-                print(*args, file=file_handle, **kwargs)
+            if stdout_handle:
+                print(*args, file=stdout_handle, **kwargs)
             else:
                 print(*args, **kwargs)
 
+        # Helper to route stderr printing seamlessly for builtins
+        def shell_error(message):
+            if stderr_handle:
+                stderr_handle.write(message)
+            else:
+                sys.stderr.write(message)
+
+        # Helper to close all open file redirection handles
+        def close_handles():
+            if stdout_handle:
+                stdout_handle.close()
+            if stderr_handle:
+                stderr_handle.close()
+
         # Handle Builtin Commands
         if command_name == "exit":
-            if file_handle:
-                file_handle.close()
+            close_handles()
             sys.exit(0)
 
         elif command_name == "echo":
             shell_print(" ".join(parts[1:]))
-            if file_handle:
-                file_handle.close()
+            close_handles()
             continue
 
         elif command_name == "pwd":
             shell_print(os.getcwd())
-            if file_handle:
-                file_handle.close()
+            close_handles()
             continue
 
         elif command_name == "cd":
@@ -168,17 +188,14 @@ def main():
             if os.path.isdir(target_directory):
                 os.chdir(target_directory)
             else:
-                # Errors go directly to stderr, never redirected to the output file
-                sys.stderr.write(f"cd: {parts[1]}: No such file or directory\n")
+                shell_error(f"cd: {parts[1]}: No such file or directory\n")
             
-            if file_handle:
-                file_handle.close()
+            close_handles()
             continue
 
         elif command_name == "type":
             if len(parts) < 2:
-                if file_handle:
-                    file_handle.close()
+                close_handles()
                 continue
             
             target_command = parts[1]
@@ -191,33 +208,26 @@ def main():
                 else:
                     shell_print(f"{target_command}: not found")
             
-            if file_handle:
-                file_handle.close()
+            close_handles()
             continue
 
         # Handle External Executables
         found_path = find_executable(command_name)
         if found_path:
             try:
-                if file_handle:
-                    # Pass the file handle directly to standard output stream of the child process
-                    subprocess.run(
-                        [command_name] + parts[1:], 
-                        executable=found_path, 
-                        stdout=file_handle
-                    )
-                else:
-                    subprocess.run(
-                        [command_name] + parts[1:], 
-                        executable=found_path
-                    )
+                # Pass the file handles directly to the child process execution context
+                subprocess.run(
+                    [command_name] + parts[1:], 
+                    executable=found_path, 
+                    stdout=stdout_handle,  # Will be None if not redirected (goes to terminal)
+                    stderr=stderr_handle   # Will be None if not redirected (goes to terminal)
+                )
             except Exception as e:
-                sys.stderr.write(f"shell: execution error: {e}\n")
+                shell_error(f"shell: execution error: {e}\n")
         else:
-            sys.stderr.write(f"{command_name}: command not found\n")
+            shell_error(f"{command_name}: command not found\n")
 
-        if file_handle:
-            file_handle.close()
+        close_handles()
 
 if __name__ == "__main__":
     main()
