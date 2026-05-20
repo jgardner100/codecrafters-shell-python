@@ -16,7 +16,7 @@ def parse_command(command_str):
     in_single_quotes = False
     in_double_quotes = False
     is_escaped = False
-    has_chars = False  # Track if we've seen characters (to handle empty quotes '')
+    has_chars = False  # Track if we've seen characters
 
     i = 0
     while i < len(command_str):
@@ -39,11 +39,10 @@ def parse_command(command_str):
             if char == '"':
                 in_double_quotes = False
             elif char == '\\':
-                # Peek ahead inside double quotes
                 if i + 1 < len(command_str) and command_str[i + 1] in ('"', '\\', '$', '`'):
                     current_arg.append(command_str[i + 1])
                     has_chars = True
-                    i += 1  # Skip the next character as it's escaped
+                    i += 1
                 else:
                     current_arg.append(char)
                     has_chars = True
@@ -51,7 +50,6 @@ def parse_command(command_str):
                 current_arg.append(char)
                 has_chars = True
         else:
-            # Outside of any quotes
             if char == '\\':
                 is_escaped = True
             elif char == "'":
@@ -99,14 +97,15 @@ def main():
         if not user_input:
             continue
 
-        # Step 1: Parse the command string completely into raw argument tokens
+        # Step 1: Parse the command string into raw argument tokens
         raw_parts = parse_command(user_input)
         if not raw_parts:
             continue
 
-        # Step 2: Extract redirection configuration if present
+        # Step 2: Extract redirection configurations and determine open modes
         parts = []
         stdout_file = None
+        stdout_mode = "w"  # Default to overwrite
         stderr_file = None
         
         i = 0
@@ -114,12 +113,19 @@ def main():
             if raw_parts[i] in (">", "1>"):
                 if i + 1 < len(raw_parts):
                     stdout_file = raw_parts[i + 1]
-                    i += 2  # Skip both the operator and the filename
+                    stdout_mode = "w"
+                    i += 2
+                    continue
+            elif raw_parts[i] in (">>", "1>>"):
+                if i + 1 < len(raw_parts):
+                    stdout_file = raw_parts[i + 1]
+                    stdout_mode = "a"  # Switch mode to APPEND
+                    i += 2
                     continue
             elif raw_parts[i] == "2>":
                 if i + 1 < len(raw_parts):
                     stderr_file = raw_parts[i + 1]
-                    i += 2  # Skip both the operator and the filename
+                    i += 2
                     continue
             parts.append(raw_parts[i])
             i += 1
@@ -129,13 +135,13 @@ def main():
 
         command_name = parts[0]
 
-        # File handles for stream redirections
+        # Step 3: Open file handles securely using the configured modes
         stdout_handle = None
         stderr_handle = None
 
         try:
             if stdout_file:
-                stdout_handle = open(stdout_file, "w")
+                stdout_handle = open(stdout_file, stdout_mode)
             if stderr_file:
                 stderr_handle = open(stderr_file, "w")
         except Exception as e:
@@ -158,7 +164,6 @@ def main():
             else:
                 sys.stderr.write(message)
 
-        # Helper to close all open file redirection handles
         def close_handles():
             if stdout_handle:
                 stdout_handle.close()
@@ -215,12 +220,11 @@ def main():
         found_path = find_executable(command_name)
         if found_path:
             try:
-                # Pass the file handles directly to the child process execution context
                 subprocess.run(
                     [command_name] + parts[1:], 
                     executable=found_path, 
-                    stdout=stdout_handle,  # Will be None if not redirected (goes to terminal)
-                    stderr=stderr_handle   # Will be None if not redirected (goes to terminal)
+                    stdout=stdout_handle,
+                    stderr=stderr_handle
                 )
             except Exception as e:
                 shell_error(f"shell: execution error: {e}\n")
