@@ -102,11 +102,12 @@ def main():
         if not raw_parts:
             continue
 
-        # Step 2: Extract redirection configurations and determine open modes
+        # Step 2: Extract redirection configurations and determine file modes
         parts = []
         stdout_file = None
         stdout_mode = "w"  # Default to overwrite
         stderr_file = None
+        stderr_mode = "w"  # Default to overwrite
         
         i = 0
         while i < len(raw_parts):
@@ -119,12 +120,19 @@ def main():
             elif raw_parts[i] in (">>", "1>>"):
                 if i + 1 < len(raw_parts):
                     stdout_file = raw_parts[i + 1]
-                    stdout_mode = "a"  # Switch mode to APPEND
+                    stdout_mode = "a"
                     i += 2
                     continue
             elif raw_parts[i] == "2>":
                 if i + 1 < len(raw_parts):
                     stderr_file = raw_parts[i + 1]
+                    stderr_mode = "w"
+                    i += 2
+                    continue
+            elif raw_parts[i] == "2>>":
+                if i + 1 < len(raw_parts):
+                    stderr_file = raw_parts[i + 1]
+                    stderr_mode = "a"  # Switch error mode to APPEND
                     i += 2
                     continue
             parts.append(raw_parts[i])
@@ -143,7 +151,7 @@ def main():
             if stdout_file:
                 stdout_handle = open(stdout_file, stdout_mode)
             if stderr_file:
-                stderr_handle = open(stderr_file, "w")
+                stderr_handle = open(stderr_file, stderr_mode)
         except Exception as e:
             sys.stderr.write(f"shell: redirection open error: {e}\n")
             if stdout_handle: stdout_handle.close()
