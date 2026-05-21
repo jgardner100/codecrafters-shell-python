@@ -1,25 +1,122 @@
 import sys
 import os
 import subprocess
-import readline  # Added for autocompletion
+import readline
 
 BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
-# The specific subset of builtins required for completion in this stage
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
+def get_all_executable_matches(text):
+    """
+    Scans BUILTINS and all directories in PATH to find files starting with 'text'
+    that are valid executable files. Returns a sorted list of unique matches.
+    """
+    matches = set()
+    
+    # 1. Check builtins
+    for cmd in AUTOCOMPLETE_COMMANDS:
+        if cmd.startswith(text):
+            matches.add(cmd)
+            
+    # 2. Check executables in PATH
+    path_env = os.environ.get("PATH", "")
+    for directory in path_env.split(os.pathsep):
+        if not directory or not os.path.isdir(directory):
+            continue
+        try:
+            # List files in the directory
+            for filename in os.listdir(directory):
+                if filename.startswith(text):
+                    full_path = os.path.join(directory, filename)
+                    # Verify it's a file and executable
+                    if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+                        matches.add(filename)
+        except Exception:
+            # Handle unreadable or permission-denied directories gracefully
+            continue
+            
+    return sorted(list(matches))
+
+def get_path_matches(text):
+    """
+    Complete non-command words as filesystem paths.
+
+    The value returned to readline must be the full replacement token,
+    not only the missing suffix. For example, when text is "b" and
+    the file is "bar", return "bar ", not "ar ".
+    """
+    if "/" in text:
+        directory_part, filename_prefix = text.rsplit("/", 1)
+        search_dir = directory_part if directory_part else "/"
+        result_prefix = directory_part + "/"
+    else:
+        search_dir = "."
+        filename_prefix = text
+        result_prefix = ""
+
+    try:
+        entries = os.listdir(search_dir)
+    except OSError:
+        return []
+
+    matches = []
+    for entry in entries:
+        if not entry.startswith(filename_prefix):
+            continue
+
+        full_path = os.path.join(search_dir, entry)
+
+        # Return the complete word that should replace the current token.
+        candidate = result_prefix + entry
+
+        if os.path.isdir(full_path):
+            candidate += "/"
+        else:
+            candidate += " "
+
+        matches.append(candidate)
+
+    return sorted(matches)
+
+
 def completer(text, state):
-    """
-    GNU Readline completer function. 
-    Filters matches based on what the user typed and appends a trailing space.
-    """
-    matches = [cmd for cmd in AUTOCOMPLETE_COMMANDS if cmd.startswith(text)]
+    """Complete command names in position 0, and file paths elsewhere."""
+    line = readline.get_line_buffer()
+    begidx = readline.get_begidx()
+
+    # If everything before the current token is whitespace, this is the
+    # command word. Otherwise it is an argument and should use path completion.
+    if line[:begidx].strip() == "":
+        matches = [match + " " for match in get_all_executable_matches(text)]
+    else:
+        matches = get_path_matches(text)
+
     if state < len(matches):
-        return matches[state] + " "
+        return matches[state]
     return None
 
-# Register the completer and bind the TAB key
+# Register the completer
 readline.set_completer(completer)
+
+# Fallback bindings ensuring TAB works under GNU Readline as well as BSD Editline (libedit)
+#readline.parse_and_bind("bind ^I rl_complete")
 readline.parse_and_bind("tab: complete")
+
+# Cross-platform safe configuration for appending trailing spaces
+if hasattr(readline, "set_completion_append_character"):
+    try:
+        readline.set_completion_append_character("")
+    except Exception:
+        pass
+
+# Safe libedit check via the module documentation string
+if "libedit" in (readline.__doc__ or "").lower():
+    try:
+        readline.parse_and_bind("set add-suffix off")
+    except Exception:
+        pass
+
+# Define delimiters so readline knows where words start and end
 readline.set_completer_delims(" \t\n")
 
 def parse_command(command_str):
@@ -96,12 +193,9 @@ def find_executable(command_name):
 
 def main():
     while True:
-        # Changed to using input() because readline wraps it seamlessly.
-        # This native integration correctly prints the prompt and catches tabs.
         try:
             user_input = input("$ ")
         except (EOFError, KeyboardInterrupt):
-            # Treat EOF (Ctrl+D) or Ctrl+C gracefully
             print()
             break
 
@@ -109,12 +203,10 @@ def main():
         if not user_input:
             continue
 
-        # Step 1: Parse the command string into raw argument tokens
         raw_parts = parse_command(user_input)
         if not raw_parts:
             continue
 
-        # Step 2: Extract redirection configurations and determine file modes
         parts = []
         stdout_file = None
         stdout_mode = "w"
@@ -155,7 +247,6 @@ def main():
 
         command_name = parts[0]
 
-        # Step 3: Open file handles securely using the configured modes
         stdout_handle = None
         stderr_handle = None
 
@@ -170,14 +261,12 @@ def main():
             if stderr_handle: stderr_handle.close()
             continue
 
-        # Helper to route stdout printing seamlessly for builtins
         def shell_print(*args, **kwargs):
             if stdout_handle:
                 print(*args, file=stdout_handle, **kwargs)
             else:
                 print(*args, **kwargs)
 
-        # Helper to route stderr printing seamlessly for builtins
         def shell_error(message):
             if stderr_handle:
                 stderr_handle.write(message)
