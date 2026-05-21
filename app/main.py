@@ -1,22 +1,36 @@
 import sys
 import os
 import subprocess
+import readline  # Added for autocompletion
 
 BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
+# The specific subset of builtins required for completion in this stage
+AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
+
+def completer(text, state):
+    """
+    GNU Readline completer function. 
+    Filters matches based on what the user typed and appends a trailing space.
+    """
+    matches = [cmd for cmd in AUTOCOMPLETE_COMMANDS if cmd.startswith(text)]
+    if state < len(matches):
+        return matches[state] + " "
+    return None
+
+# Register the completer and bind the TAB key
+readline.set_completer(completer)
+readline.parse_and_bind("tab: complete")
+readline.set_completer_delims(" \t\n")
 
 def parse_command(command_str):
-    """
-    Parses the command string character-by-character to properly handle:
-    - Single quotes, double quotes, and backslashes.
-    - Token concatenation and space preservation.
-    """
+    """Parses the command string character-by-character."""
     args = []
     current_arg = []
     
     in_single_quotes = False
     in_double_quotes = False
     is_escaped = False
-    has_chars = False  # Track if we've seen characters
+    has_chars = False
 
     i = 0
     while i < len(command_str):
@@ -82,16 +96,14 @@ def find_executable(command_name):
 
 def main():
     while True:
-        sys.stdout.write("$ ")
-        sys.stdout.flush()
-        
+        # Changed to using input() because readline wraps it seamlessly.
+        # This native integration correctly prints the prompt and catches tabs.
         try:
-            user_input = sys.stdin.readline()
-            if not user_input:
-                break
-        except KeyboardInterrupt:
+            user_input = input("$ ")
+        except (EOFError, KeyboardInterrupt):
+            # Treat EOF (Ctrl+D) or Ctrl+C gracefully
             print()
-            continue
+            break
 
         user_input = user_input.strip()
         if not user_input:
@@ -105,9 +117,9 @@ def main():
         # Step 2: Extract redirection configurations and determine file modes
         parts = []
         stdout_file = None
-        stdout_mode = "w"  # Default to overwrite
+        stdout_mode = "w"
         stderr_file = None
-        stderr_mode = "w"  # Default to overwrite
+        stderr_mode = "w"
         
         i = 0
         while i < len(raw_parts):
@@ -132,7 +144,7 @@ def main():
             elif raw_parts[i] == "2>>":
                 if i + 1 < len(raw_parts):
                     stderr_file = raw_parts[i + 1]
-                    stderr_mode = "a"  # Switch error mode to APPEND
+                    stderr_mode = "a"
                     i += 2
                     continue
             parts.append(raw_parts[i])
