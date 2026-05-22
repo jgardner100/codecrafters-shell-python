@@ -3,7 +3,8 @@ import os
 import subprocess
 import readline
 
-BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
+# 1. Added "complete" to the BUILTINS set
+BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete"}
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
 def get_all_executable_matches(text):
@@ -322,6 +323,11 @@ def main():
                 else:
                     shell_print(f"{target_command}: not found")
             
+            close_handles()
+            continue
+
+        # 2. No-op handler for "complete" command execution to gracefully continue
+        elif command_name == "complete":
             close_handles()
             continue
 
