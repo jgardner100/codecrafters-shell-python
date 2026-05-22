@@ -3,7 +3,6 @@ import os
 import subprocess
 import readline
 
-# 1. Added "complete" to the BUILTINS set
 BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete"}
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
@@ -326,8 +325,12 @@ def main():
             close_handles()
             continue
 
-        # 2. No-op handler for "complete" command execution to gracefully continue
+        # Handle Complete Builtin with -p flag support
         elif command_name == "complete":
+            if len(parts) > 2 and parts[1] == "-p":
+                target_cmd = parts[2]
+                shell_print(f"complete: {target_cmd}: no completion specification")
+            
             close_handles()
             continue
 
