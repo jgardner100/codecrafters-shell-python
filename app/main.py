@@ -77,10 +77,40 @@ def get_path_matches(text):
 
 
 def completer(text, state):
-    """Complete command names in position 0, and file paths elsewhere."""
+    """Complete command names in position 0, and file paths or custom scripts elsewhere."""
     line = readline.get_line_buffer()
     begidx = readline.get_begidx()
 
+    # Step 1: Detect if a programmable completion script is registered for this command context
+    tokens = line.split()
+    if tokens:
+        first_word = tokens[0]
+        # Ensure we are autocompleting an argument context, not the first command word itself
+        if line[:begidx].strip() != "" and first_word in COMPLETIONS:
+            script_path = COMPLETIONS[first_word]
+            try:
+                # Synchronously run the custom external completion script
+                result = subprocess.run(
+                    [script_path], 
+                    capture_output=True, 
+                    text=True, 
+                    check=True
+                )
+                # Read stdout lines
+                outputs = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+                if outputs:
+                    # Append a trailing space to the candidate completion token
+                    matches = [outputs[0] + " "]
+                else:
+                    matches = []
+            except Exception:
+                matches = []
+                
+            if state < len(matches):
+                return matches[state]
+            return None
+
+    # Step 2: Fall back to existing completion logic if no custom script is registered
     if line[:begidx].strip() == "":
         matches = [match + " " for match in get_all_executable_matches(text)]
     else:
@@ -314,10 +344,9 @@ def main():
             close_handles()
             continue
 
-        # Handle Complete Builtin with -p and -C flag support
+        # Handle Complete Builtin
         elif command_name == "complete":
             if len(parts) > 1:
-                # Case 1: complete -p <command>
                 if parts[1] == "-p" and len(parts) > 2:
                     target_cmd = parts[2]
                     if target_cmd in COMPLETIONS:
@@ -326,7 +355,6 @@ def main():
                     else:
                         shell_print(f"complete: {target_cmd}: no completion specification")
                 
-                # Case 2: complete -C <path> <command>
                 elif parts[1] == "-C" and len(parts) > 3:
                     script_path = parts[2]
                     target_cmd = parts[3]
