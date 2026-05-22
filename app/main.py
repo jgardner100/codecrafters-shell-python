@@ -6,6 +6,9 @@ import readline
 BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete"}
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
+# In-memory storage mapping command names to their registered completion script paths
+COMPLETIONS = {}
+
 def get_all_executable_matches(text):
     """
     Scans BUILTINS and all directories in PATH to find files starting with 'text'
@@ -40,10 +43,6 @@ def get_all_executable_matches(text):
 def get_path_matches(text):
     """
     Complete non-command words as filesystem paths.
-
-    The value returned to readline must be the full replacement token,
-    not only the missing suffix. For example, when text is "b" and
-    the file is "bar", return "bar ", not "ar ".
     """
     if "/" in text:
         directory_part, filename_prefix = text.rsplit("/", 1)
@@ -65,8 +64,6 @@ def get_path_matches(text):
             continue
 
         full_path = os.path.join(search_dir, entry)
-
-        # Return the complete word that should replace the current token.
         candidate = result_prefix + entry
 
         if os.path.isdir(full_path):
@@ -84,8 +81,6 @@ def completer(text, state):
     line = readline.get_line_buffer()
     begidx = readline.get_begidx()
 
-    # If everything before the current token is whitespace, this is the
-    # command word. Otherwise it is an argument and should use path completion.
     if line[:begidx].strip() == "":
         matches = [match + " " for match in get_all_executable_matches(text)]
     else:
@@ -97,26 +92,20 @@ def completer(text, state):
 
 # Register the completer
 readline.set_completer(completer)
-
-# Fallback bindings ensuring TAB works under GNU Readline as well as BSD Editline (libedit)
-#readline.parse_and_bind("bind ^I rl_complete")
 readline.parse_and_bind("tab: complete")
 
-# Cross-platform safe configuration for appending trailing spaces
 if hasattr(readline, "set_completion_append_character"):
     try:
         readline.set_completion_append_character("")
     except Exception:
         pass
 
-# Safe libedit check via the module documentation string
 if "libedit" in (readline.__doc__ or "").lower():
     try:
         readline.parse_and_bind("set add-suffix off")
     except Exception:
         pass
 
-# Define delimiters so readline knows where words start and end
 readline.set_completer_delims(" \t\n")
 
 def parse_command(command_str):
@@ -325,12 +314,24 @@ def main():
             close_handles()
             continue
 
-        # Handle Complete Builtin with -p flag support
+        # Handle Complete Builtin with -p and -C flag support
         elif command_name == "complete":
-            if len(parts) > 2 and parts[1] == "-p":
-                target_cmd = parts[2]
-                shell_print(f"complete: {target_cmd}: no completion specification")
-            
+            if len(parts) > 1:
+                # Case 1: complete -p <command>
+                if parts[1] == "-p" and len(parts) > 2:
+                    target_cmd = parts[2]
+                    if target_cmd in COMPLETIONS:
+                        script_path = COMPLETIONS[target_cmd]
+                        shell_print(f"complete -C '{script_path}' {target_cmd}")
+                    else:
+                        shell_print(f"complete: {target_cmd}: no completion specification")
+                
+                # Case 2: complete -C <path> <command>
+                elif parts[1] == "-C" and len(parts) > 3:
+                    script_path = parts[2]
+                    target_cmd = parts[3]
+                    COMPLETIONS[target_cmd] = script_path
+                    
             close_handles()
             continue
 
