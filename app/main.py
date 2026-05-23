@@ -370,9 +370,9 @@ def main():
                     target_cmd = parts[2]
                     if target_cmd in COMPLETIONS:
                         script_path = COMPLETIONS[target_cmd]
-                        shell_print(f\"complete -C '{script_path}' {target_cmd}\")
+                        shell_print(f"complete -C '{script_path}' {target_cmd}")
                     else:
-                        shell_print(f\"complete: {target_cmd}: no completion specification\")
+                        shell_print(f"complete: {target_cmd}: no completion specification")
                 
                 # --- complete -r <cmd> (New Code) ---
                 elif parts[1] == "-r" and len(parts) > 2:
