@@ -365,15 +365,23 @@ def main():
         # Handle Complete Builtin
         elif command_name == "complete":
             if len(parts) > 1:
-                if parts[1] == "-p" and len(parts) > 2:
+                # --- complete -p <cmd> ---
+                if parts[1] == \"-p\" and len(parts) > 2:
                     target_cmd = parts[2]
                     if target_cmd in COMPLETIONS:
                         script_path = COMPLETIONS[target_cmd]
-                        shell_print(f"complete -C '{script_path}' {target_cmd}")
+                        shell_print(f\"complete -C '{script_path}' {target_cmd}\")
                     else:
-                        shell_print(f"complete: {target_cmd}: no completion specification")
+                        shell_print(f\"complete: {target_cmd}: no completion specification\")
                 
-                elif parts[1] == "-C" and len(parts) > 3:
+                # --- complete -r <cmd> (New Code) ---
+                elif parts[1] == \"-r\" and len(parts) > 2:
+                    target_cmd = parts[2]
+                    # Safely remove the target command key if it exists, doing nothing if it doesn't
+                    COMPLETIONS.pop(target_cmd, None)
+                
+                # --- complete -C <script> <cmd> ---
+                elif parts[1] == \"-C\" and len(parts) > 3:
                     script_path = parts[2]
                     target_cmd = parts[3]
                     COMPLETIONS[target_cmd] = script_path
