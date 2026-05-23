@@ -75,7 +75,6 @@ def get_path_matches(text):
 
     return sorted(matches)
 
-
 def completer(text, state):
     """Complete command names in position 0, and file paths or custom scripts elsewhere."""
     line = readline.get_line_buffer()
@@ -88,10 +87,25 @@ def completer(text, state):
         # Ensure we are autocompleting an argument context, not the first command word itself
         if line[:begidx].strip() != "" and first_word in COMPLETIONS:
             script_path = COMPLETIONS[first_word]
+            
+            # --- Argument extraction logic ---
+            # argv[1]: The command name
+            argv1 = first_word
+            
+            # argv[2]: The word currently being completed (passed as `text`)
+            argv2 = text
+            
+            # argv[3]: The word immediately before the word being completed
+            # Extract everything in the line up to where the current token starts
+            prefix_line = line[:begidx]
+            prefix_tokens = prefix_line.split()
+            argv3 = prefix_tokens[-1] if prefix_tokens else ""
+            # ---------------------------------
+
             try:
-                # Synchronously run the custom external completion script
+                # Synchronously run the custom external completion script with arguments
                 result = subprocess.run(
-                    [script_path], 
+                    [script_path, argv1, argv2, argv3], 
                     capture_output=True, 
                     text=True, 
                     check=True
