@@ -79,17 +79,16 @@ def completer(text, state):
     """Complete command names in position 0, and file paths or custom scripts elsewhere."""
     line = readline.get_line_buffer()
     begidx = readline.get_begidx()
-    endidx = readline.get_endidx()  # Capture the precise cursor position index
+    endidx = readline.get_endidx()
 
     # Step 1: Detect if a programmable completion script is registered for this command context
     tokens = line.split()
     if tokens:
         first_word = tokens[0]
-        # Ensure we are autocompleting an argument context, not the first command word itself
         if line[:begidx].strip() != "" and first_word in COMPLETIONS:
             script_path = COMPLETIONS[first_word]
             
-            # --- Argument extraction logic ---
+            # Arguments extraction
             argv1 = first_word
             argv2 = text
             
@@ -97,29 +96,31 @@ def completer(text, state):
             prefix_tokens = prefix_line.split()
             argv3 = prefix_tokens[-1] if prefix_tokens else ""
             
-            # --- Environment configuration block ---
-            # Duplicate the current shell environment so we don't pollute the global scope
+            # Isolated environment config
             env_override = os.environ.copy()
             env_override["COMP_LINE"] = line
-            env_override["COMP_POINT"] = str(endidx)  # Must be passed as a string
-            # ----------------------------------------
+            env_override["COMP_POINT"] = str(endidx)
 
             try:
-                # Synchronously run the custom external completion script with arguments and environment
                 result = subprocess.run(
                     [script_path, argv1, argv2, argv3], 
                     capture_output=True, 
                     text=True, 
                     check=True,
-                    env=env_override  # Inject the isolated environment variables here
+                    env=env_override
                 )
-                # Read stdout lines
+                # Gather all valid candidates from the script output
                 outputs = [l.strip() for l in result.stdout.splitlines() if l.strip()]
-                if outputs:
-                    # Append a trailing space to the candidate completion token
+                
+                # Requirements state: Candidates must be sorted alphabetically
+                outputs = sorted(outputs)
+                
+                if len(outputs) == 1:
+                    # Only append a space if it's a unique singular completion match
                     matches = [outputs[0] + " "]
                 else:
-                    matches = []
+                    # Let readline display multiple matches purely
+                    matches = outputs
             except Exception:
                 matches = []
                 
@@ -127,7 +128,7 @@ def completer(text, state):
                 return matches[state]
             return None
 
-    # Step 2: Fall back to existing completion logic if no custom script is registered
+    # Step 2: Fall back to existing completion logic
     if line[:begidx].strip() == "":
         matches = [match + " " for match in get_all_executable_matches(text)]
     else:
