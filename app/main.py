@@ -366,7 +366,7 @@ def main():
         elif command_name == "complete":
             if len(parts) > 1:
                 # --- complete -p <cmd> ---
-                if parts[1] == \"-p\" and len(parts) > 2:
+                if parts[1] == "-p" and len(parts) > 2:
                     target_cmd = parts[2]
                     if target_cmd in COMPLETIONS:
                         script_path = COMPLETIONS[target_cmd]
@@ -375,13 +375,13 @@ def main():
                         shell_print(f\"complete: {target_cmd}: no completion specification\")
                 
                 # --- complete -r <cmd> (New Code) ---
-                elif parts[1] == \"-r\" and len(parts) > 2:
+                elif parts[1] == "-r" and len(parts) > 2:
                     target_cmd = parts[2]
                     # Safely remove the target command key if it exists, doing nothing if it doesn't
                     COMPLETIONS.pop(target_cmd, None)
                 
                 # --- complete -C <script> <cmd> ---
-                elif parts[1] == \"-C\" and len(parts) > 3:
+                elif parts[1] == "-C" and len(parts) > 3:
                     script_path = parts[2]
                     target_cmd = parts[3]
                     COMPLETIONS[target_cmd] = script_path
