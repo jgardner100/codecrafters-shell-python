@@ -79,6 +79,7 @@ def completer(text, state):
     """Complete command names in position 0, and file paths or custom scripts elsewhere."""
     line = readline.get_line_buffer()
     begidx = readline.get_begidx()
+    endidx = readline.get_endidx()  # Capture the precise cursor position index
 
     # Step 1: Detect if a programmable completion script is registered for this command context
     tokens = line.split()
@@ -89,26 +90,28 @@ def completer(text, state):
             script_path = COMPLETIONS[first_word]
             
             # --- Argument extraction logic ---
-            # argv[1]: The command name
             argv1 = first_word
-            
-            # argv[2]: The word currently being completed (passed as `text`)
             argv2 = text
             
-            # argv[3]: The word immediately before the word being completed
-            # Extract everything in the line up to where the current token starts
             prefix_line = line[:begidx]
             prefix_tokens = prefix_line.split()
             argv3 = prefix_tokens[-1] if prefix_tokens else ""
-            # ---------------------------------
+            
+            # --- Environment configuration block ---
+            # Duplicate the current shell environment so we don't pollute the global scope
+            env_override = os.environ.copy()
+            env_override["COMP_LINE"] = line
+            env_override["COMP_POINT"] = str(endidx)  # Must be passed as a string
+            # ----------------------------------------
 
             try:
-                # Synchronously run the custom external completion script with arguments
+                # Synchronously run the custom external completion script with arguments and environment
                 result = subprocess.run(
                     [script_path, argv1, argv2, argv3], 
                     capture_output=True, 
                     text=True, 
-                    check=True
+                    check=True,
+                    env=env_override  # Inject the isolated environment variables here
                 )
                 # Read stdout lines
                 outputs = [l.strip() for l in result.stdout.splitlines() if l.strip()]
