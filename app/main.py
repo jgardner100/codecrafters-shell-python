@@ -3,7 +3,7 @@ import os
 import subprocess
 import readline
 
-BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete"}
+BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete", "jobs"}
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
 # In-memory storage mapping command names to their registered completion script paths
