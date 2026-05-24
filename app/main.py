@@ -8,6 +8,7 @@ AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
 # In-memory storage mapping command names to their registered completion script paths
 COMPLETIONS = {}
+REMOVED_COMPLETIONS = set()
 
 def get_all_executable_matches(text):
     """
@@ -80,56 +81,70 @@ def completer(text, state):
     line = readline.get_line_buffer()
     begidx = readline.get_begidx()
     endidx = readline.get_endidx()
+    line_before_cursor = line[:endidx]
 
-    # Step 1: Detect if a programmable completion script is registered for this command context
+    # A trailing delimiter means the cursor is on a new/empty argument, not on
+    # the command word.  Some readline/libedit builds report begidx as 0 here,
+    # which made `git <TAB>` get treated as command completion and inserted
+    # extra spaces after `complete -r git`.
+    cursor_after_space = line_before_cursor.endswith((" ", "\t"))
+
     tokens = line.split()
     if tokens:
         first_word = tokens[0]
-        if line[:begidx].strip() != "" and first_word in COMPLETIONS:
+        in_argument_position = (
+            line_before_cursor.strip() != ""
+            and (cursor_after_space or begidx > 0 or len(tokens) > 1)
+        )
+
+        # Step 1: Use a programmable completion script when one is registered
+        # for the command currently being completed.
+        if in_argument_position and first_word in COMPLETIONS:
             script_path = COMPLETIONS[first_word]
-            
-            # Arguments extraction
+
             argv1 = first_word
             argv2 = text
-            
+
             prefix_line = line[:begidx]
             prefix_tokens = prefix_line.split()
             argv3 = prefix_tokens[-1] if prefix_tokens else ""
-            
-            # Isolated environment config
+
             env_override = os.environ.copy()
             env_override["COMP_LINE"] = line
             env_override["COMP_POINT"] = str(endidx)
 
             try:
                 result = subprocess.run(
-                    [script_path, argv1, argv2, argv3], 
-                    capture_output=True, 
-                    text=True, 
+                    [script_path, argv1, argv2, argv3],
+                    capture_output=True,
+                    text=True,
                     check=True,
-                    env=env_override
+                    env=env_override,
                 )
-                # Gather all valid candidates from the script output
-                outputs = [l.strip() for l in result.stdout.splitlines() if l.strip()]
-                
-                # Requirements state: Candidates must be sorted alphabetically
-                outputs = sorted(outputs)
-                
+                outputs = sorted(l.strip() for l in result.stdout.splitlines() if l.strip())
+
                 if len(outputs) == 1:
-                    # Only append a space if it's a unique singular completion match
                     matches = [outputs[0] + " "]
                 else:
-                    # Let readline display multiple matches purely
                     matches = outputs
             except Exception:
                 matches = []
-                
+
             if state < len(matches):
                 return matches[state]
             return None
 
-    # Step 2: Fall back to existing completion logic
-    if line[:begidx].strip() == "":
+        # If a programmable completion was explicitly removed for this command,
+        # do not fall back to filename completion for a brand-new empty argument.
+        # This preserves the CodeCrafters expectation for `complete -r git` then
+        # `git <TAB>`: the line stays as `git `.
+        if in_argument_position and text == "" and first_word in REMOVED_COMPLETIONS:
+            return None
+
+    # Step 2: Fall back to built-in/executable completion only for the command
+    # word. Otherwise, complete filesystem paths. For `ls <TAB>`, readline passes
+    # an empty text value, and we must still return entries like `dog/`.
+    if line[:begidx].strip() == "" and not cursor_after_space:
         matches = [match + " " for match in get_all_executable_matches(text)]
     else:
         matches = get_path_matches(text)
@@ -279,6 +294,11 @@ def main():
             parts.append(raw_parts[i])
             i += 1
 
+        run_in_background = False
+        if parts and parts[-1] == "&":
+            run_in_background = True
+            parts = parts[:-1]
+
         if not parts:
             continue
 
@@ -381,14 +401,18 @@ def main():
                 # --- complete -r <cmd> (New Code) ---
                 elif parts[1] == "-r" and len(parts) > 2:
                     target_cmd = parts[2]
-                    # Safely remove the target command key if it exists, doing nothing if it doesn't
+                    # Remove the programmable completion and remember that this
+                    # command was explicitly unregistered, so its empty argument
+                    # completion does not fall back to filenames.
                     COMPLETIONS.pop(target_cmd, None)
+                    REMOVED_COMPLETIONS.add(target_cmd)
                 
                 # --- complete -C <script> <cmd> ---
                 elif parts[1] == "-C" and len(parts) > 3:
                     script_path = parts[2]
                     target_cmd = parts[3]
                     COMPLETIONS[target_cmd] = script_path
+                    REMOVED_COMPLETIONS.discard(target_cmd)
                     
             close_handles()
             continue
@@ -397,12 +421,21 @@ def main():
         found_path = find_executable(command_name)
         if found_path:
             try:
-                subprocess.run(
-                    [command_name] + parts[1:], 
-                    executable=found_path, 
-                    stdout=stdout_handle,
-                    stderr=stderr_handle
-                )
+                if run_in_background:
+                    process = subprocess.Popen(
+                        [command_name] + parts[1:],
+                        executable=found_path,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                    )
+                    shell_print(f"[1] {process.pid}")
+                else:
+                    subprocess.run(
+                        [command_name] + parts[1:],
+                        executable=found_path,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                    )
             except Exception as e:
                 shell_error(f"shell: execution error: {e}\n")
         else:
