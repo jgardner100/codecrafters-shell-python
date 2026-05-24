@@ -321,6 +321,10 @@ def main():
             close_handles()
             sys.exit(0)
 
+        elif command_name == "jobs":
+            close_handles()
+            continue
+
         elif command_name == "echo":
             shell_print(" ".join(parts[1:]))
             close_handles()
