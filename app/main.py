@@ -243,7 +243,21 @@ def find_executable(command_name):
             return full_path
     return None
 
+def next_job_number(background_jobs):
+    """Return the smallest available job number."""
+    used_numbers = {job["job_number"] for job in background_jobs}
+    job_number = 1
+    while job_number in used_numbers:
+        job_number += 1
+    return job_number
+
+def format_job(job, marker="+"):
+    """Format a background job in the jobs builtin output format."""
+    status = job["status"]
+    return f"[{job['job_number']}]{marker}  {status:<24}{job['command']}"
+
 def main():
+    background_jobs = []
     while True:
         try:
             user_input = input("$ ")
@@ -342,6 +356,16 @@ def main():
             sys.exit(0)
 
         elif command_name == "jobs":
+            running_jobs = []
+            for job in background_jobs:
+                if job["process"].poll() is None:
+                    running_jobs.append(job)
+
+            background_jobs = running_jobs
+
+            for job in background_jobs:
+                shell_print(format_job(job))
+
             close_handles()
             continue
 
@@ -428,7 +452,16 @@ def main():
                         stdout=stdout_handle,
                         stderr=stderr_handle,
                     )
-                    shell_print(f"[1] {process.pid}")
+                    job_number = next_job_number(background_jobs)
+                    command_text = " ".join(parts) + " &"
+                    background_jobs.append({
+                        "job_number": job_number,
+                        "process": process,
+                        "pid": process.pid,
+                        "command": command_text,
+                        "status": "Running",
+                    })
+                    shell_print(f"[{job_number}] {process.pid}")
                 else:
                     subprocess.run(
                         [command_name] + parts[1:],
