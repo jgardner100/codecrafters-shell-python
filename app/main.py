@@ -258,15 +258,64 @@ def format_job(job, marker="+"):
 
     # Running background jobs are displayed with the trailing ampersand.
     # Completed jobs are displayed once as Done, without the trailing ampersand,
-    # then removed from the job table by the jobs builtin.
+    # then removed from the job table.
     if status == "Done" and command.endswith(" &"):
         command = command[:-2]
 
     return f"[{job['job_number']}]{marker}  {status:<24}{command}"
 
+
+def get_job_markers(jobs):
+    """Return the marker for each job number based on start order."""
+    markers = {job["job_number"]: " " for job in jobs}
+
+    if jobs:
+        markers[jobs[-1]["job_number"]] = "+"
+    if len(jobs) > 1:
+        markers[jobs[-2]["job_number"]] = "-"
+
+    return markers
+
+
+def reap_jobs(background_jobs, display_done_only=True, output_func=print):
+    """
+    Reap exited background jobs.
+
+    When display_done_only is True, only completed jobs are printed. This is
+    used before each prompt. When False, both running and completed jobs are
+    printed for the jobs builtin. Completed jobs are removed in both cases, so
+    each Done line appears exactly once.
+    """
+    jobs_to_display = []
+    remaining_jobs = []
+    done_jobs = []
+
+    for job in background_jobs:
+        if job["process"].poll() is None:
+            job["status"] = "Running"
+            jobs_to_display.append(job)
+            remaining_jobs.append(job)
+        else:
+            job["status"] = "Done"
+            jobs_to_display.append(job)
+            done_jobs.append(job)
+
+    markers = get_job_markers(jobs_to_display)
+    display_jobs = done_jobs if display_done_only else jobs_to_display
+
+    for job in sorted(display_jobs, key=lambda item: item["job_number"]):
+        output_func(format_job(job, markers.get(job["job_number"], " ")))
+
+    return remaining_jobs
+
 def main():
     background_jobs = []
     while True:
+        # Reap any completed background jobs before showing the next prompt.
+        # This prints Done lines after the previous command output and before
+        # the next $ prompt.
+        background_jobs = reap_jobs(background_jobs, display_done_only=True)
+
         try:
             user_input = input("$ ")
         except (EOFError, KeyboardInterrupt):
@@ -364,33 +413,11 @@ def main():
             sys.exit(0)
 
         elif command_name == "jobs":
-            jobs_to_display = []
-            remaining_jobs = []
-
-            for job in background_jobs:
-                if job["process"].poll() is None:
-                    job["status"] = "Running"
-                    jobs_to_display.append(job)
-                    remaining_jobs.append(job)
-                else:
-                    job["status"] = "Done"
-                    jobs_to_display.append(job)
-
-            current_job_number = jobs_to_display[-1]["job_number"] if jobs_to_display else None
-            previous_job_number = jobs_to_display[-2]["job_number"] if len(jobs_to_display) > 1 else None
-
-            for job in sorted(jobs_to_display, key=lambda item: item["job_number"]):
-                if job["job_number"] == current_job_number:
-                    marker = "+"
-                elif job["job_number"] == previous_job_number:
-                    marker = "-"
-                else:
-                    marker = " "
-                shell_print(format_job(job, marker))
-
-            # Completed jobs are shown exactly once. Keep only jobs that are
-            # still running so the next jobs call does not print Done again.
-            background_jobs = remaining_jobs
+            background_jobs = reap_jobs(
+                background_jobs,
+                display_done_only=False,
+                output_func=shell_print,
+            )
 
             close_handles()
             continue
