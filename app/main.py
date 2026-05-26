@@ -254,7 +254,15 @@ def next_job_number(background_jobs):
 def format_job(job, marker="+"):
     """Format a background job in the jobs builtin output format."""
     status = job["status"]
-    return f"[{job['job_number']}]{marker}  {status:<24}{job['command']}"
+    command = job["command"]
+
+    # Running background jobs are displayed with the trailing ampersand.
+    # Completed jobs are displayed once as Done, without the trailing ampersand,
+    # then removed from the job table by the jobs builtin.
+    if status == "Done" and command.endswith(" &"):
+        command = command[:-2]
+
+    return f"[{job['job_number']}]{marker}  {status:<24}{command}"
 
 def main():
     background_jobs = []
@@ -356,17 +364,22 @@ def main():
             sys.exit(0)
 
         elif command_name == "jobs":
-            running_jobs = []
+            jobs_to_display = []
+            remaining_jobs = []
+
             for job in background_jobs:
                 if job["process"].poll() is None:
-                    running_jobs.append(job)
+                    job["status"] = "Running"
+                    jobs_to_display.append(job)
+                    remaining_jobs.append(job)
+                else:
+                    job["status"] = "Done"
+                    jobs_to_display.append(job)
 
-            background_jobs = running_jobs
+            current_job_number = jobs_to_display[-1]["job_number"] if jobs_to_display else None
+            previous_job_number = jobs_to_display[-2]["job_number"] if len(jobs_to_display) > 1 else None
 
-            current_job_number = background_jobs[-1]["job_number"] if background_jobs else None
-            previous_job_number = background_jobs[-2]["job_number"] if len(background_jobs) > 1 else None
-
-            for job in sorted(background_jobs, key=lambda item: item["job_number"]):
+            for job in sorted(jobs_to_display, key=lambda item: item["job_number"]):
                 if job["job_number"] == current_job_number:
                     marker = "+"
                 elif job["job_number"] == previous_job_number:
@@ -374,6 +387,10 @@ def main():
                 else:
                     marker = " "
                 shell_print(format_job(job, marker))
+
+            # Completed jobs are shown exactly once. Keep only jobs that are
+            # still running so the next jobs call does not print Done again.
+            background_jobs = remaining_jobs
 
             close_handles()
             continue
