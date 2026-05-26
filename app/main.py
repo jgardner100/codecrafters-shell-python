@@ -219,6 +219,12 @@ def parse_command(command_str):
                 in_single_quotes = True
             elif char == '"':
                 in_double_quotes = True
+            elif char == '|':
+                if current_arg or has_chars:
+                    args.append("".join(current_arg))
+                    current_arg = []
+                    has_chars = False
+                args.append("|")
             elif char in (' ', '\t'):
                 if current_arg or has_chars:
                     args.append("".join(current_arg))
@@ -275,6 +281,90 @@ def get_job_markers(jobs):
         markers[jobs[-2]["job_number"]] = "-"
 
     return markers
+
+
+def run_external_pipeline(parts, stdout_handle=None, stderr_handle=None, shell_error=sys.stderr.write):
+    """Run a simple two-command external pipeline.
+
+    The current CodeCrafters stage only requires pipelines made from two
+    external commands, such as `cat file | wc` and `tail -f file | head -n 5`.
+    This function starts both commands with the stdout of the left command
+    connected to the stdin of the right command.
+    """
+    pipe_count = parts.count("|")
+    if pipe_count != 1:
+        shell_error("shell: only two-command pipelines are supported\n")
+        return
+
+    pipe_index = parts.index("|")
+    left_parts = parts[:pipe_index]
+    right_parts = parts[pipe_index + 1:]
+
+    if not left_parts or not right_parts:
+        shell_error("shell: invalid pipeline\n")
+        return
+
+    left_path = find_executable(left_parts[0])
+    if not left_path:
+        shell_error(f"{left_parts[0]}: command not found\n")
+        return
+
+    right_path = find_executable(right_parts[0])
+    if not right_path:
+        shell_error(f"{right_parts[0]}: command not found\n")
+        return
+
+    left_process = None
+    right_process = None
+
+    try:
+        left_process = subprocess.Popen(
+            [left_parts[0]] + left_parts[1:],
+            executable=left_path,
+            stdout=subprocess.PIPE,
+            stderr=stderr_handle,
+        )
+
+        right_process = subprocess.Popen(
+            [right_parts[0]] + right_parts[1:],
+            executable=right_path,
+            stdin=left_process.stdout,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+        )
+
+        # The parent must close its copy of the pipe's write/read handle so the
+        # right command can see EOF and the left command can receive SIGPIPE if
+        # the right command exits early. This is important for `tail -f | head`.
+        if left_process.stdout:
+            left_process.stdout.close()
+
+        right_process.wait()
+
+        # In cases like `tail -f file | head -n 5`, the right command exits
+        # once it has enough input, but the left command can otherwise keep
+        # following the file. Clean it up so the shell returns to the prompt.
+        try:
+            left_process.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            left_process.terminate()
+            try:
+                left_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                left_process.kill()
+                left_process.wait()
+
+    except Exception as e:
+        shell_error(f"shell: pipeline execution error: {e}\n")
+
+        for process in (right_process, left_process):
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
 
 
 def reap_jobs(background_jobs, display_done_only=True, output_func=print):
@@ -406,6 +496,21 @@ def main():
                 stdout_handle.close()
             if stderr_handle:
                 stderr_handle.close()
+
+        # Handle simple two-command external pipelines before builtins.
+        if "|" in parts:
+            if run_in_background:
+                shell_error("shell: background pipelines are not supported\n")
+            else:
+                run_external_pipeline(
+                    parts,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    shell_error=shell_error,
+                )
+
+            close_handles()
+            continue
 
         # Handle Builtin Commands
         if command_name == "exit":
