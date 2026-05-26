@@ -2,7 +2,11 @@ import sys
 import os
 import subprocess
 import readline
+import warnings
 
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Pipeline builtins patch: pipeline stages dispatch shell builtins before PATH lookup.
 BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete", "jobs"}
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
@@ -224,7 +228,7 @@ def parse_command(command_str):
                     args.append("".join(current_arg))
                     current_arg = []
                     has_chars = False
-                args.append("|")
+                args.append('|')
             elif char in (' ', '\t'):
                 if current_arg or has_chars:
                     args.append("".join(current_arg))
@@ -283,88 +287,262 @@ def get_job_markers(jobs):
     return markers
 
 
-def run_external_pipeline(parts, stdout_handle=None, stderr_handle=None, shell_error=sys.stderr.write):
-    """Run a simple two-command external pipeline.
+def write_line(file_obj, text):
+    """Write one line to a text stream and flush it."""
+    try:
+        file_obj.write(text + "\n")
+        file_obj.flush()
+    except BrokenPipeError:
+        # The next pipeline stage may have exited already, e.g. `yes | head`.
+        pass
 
-    The current CodeCrafters stage only requires pipelines made from two
-    external commands, such as `cat file | wc` and `tail -f file | head -n 5`.
-    This function starts both commands with the stdout of the left command
-    connected to the stdin of the right command.
+
+def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None):
+    """Run a shell builtin and return its exit status.
+
+    This is shared by the normal command path and by child processes created for
+    pipeline stages.  Builtins run inside pipeline children, so state-changing
+    builtins like `cd` intentionally do not affect the parent shell there.
     """
-    pipe_count = parts.count("|")
-    if pipe_count != 1:
-        shell_error("shell: only two-command pipelines are supported\n")
-        return
+    if not parts:
+        return 0
 
-    pipe_index = parts.index("|")
-    left_parts = parts[:pipe_index]
-    right_parts = parts[pipe_index + 1:]
+    command_name = parts[0]
 
-    if not left_parts or not right_parts:
+    if command_name == "exit":
+        raise SystemExit(0)
+
+    if command_name == "echo":
+        write_line(stdout_file, " ".join(parts[1:]))
+        return 0
+
+    if command_name == "pwd":
+        write_line(stdout_file, os.getcwd())
+        return 0
+
+    if command_name == "cd":
+        target_directory = parts[1] if len(parts) > 1 else "~"
+        display_target = target_directory
+        if target_directory == "~":
+            target_directory = os.environ.get("HOME", "")
+
+        if os.path.isdir(target_directory):
+            os.chdir(target_directory)
+            return 0
+
+        write_line(stderr_file, f"cd: {display_target}: No such file or directory")
+        return 1
+
+    if command_name == "type":
+        if len(parts) < 2:
+            return 0
+
+        target_command = parts[1]
+        if target_command in BUILTINS:
+            write_line(stdout_file, f"{target_command} is a shell builtin")
+        else:
+            found_path = find_executable(target_command)
+            if found_path:
+                write_line(stdout_file, f"{target_command} is {found_path}")
+            else:
+                write_line(stdout_file, f"{target_command}: not found")
+        return 0
+
+    if command_name == "complete":
+        if len(parts) > 1:
+            if parts[1] == "-p" and len(parts) > 2:
+                target_cmd = parts[2]
+                if target_cmd in COMPLETIONS:
+                    script_path = COMPLETIONS[target_cmd]
+                    write_line(stdout_file, f"complete -C '{script_path}' {target_cmd}")
+                else:
+                    write_line(stdout_file, f"complete: {target_cmd}: no completion specification")
+            elif parts[1] == "-r" and len(parts) > 2:
+                target_cmd = parts[2]
+                COMPLETIONS.pop(target_cmd, None)
+                REMOVED_COMPLETIONS.add(target_cmd)
+            elif parts[1] == "-C" and len(parts) > 3:
+                script_path = parts[2]
+                target_cmd = parts[3]
+                COMPLETIONS[target_cmd] = script_path
+                REMOVED_COMPLETIONS.discard(target_cmd)
+        return 0
+
+    if command_name == "jobs":
+        if background_jobs is not None:
+            def output_func(line):
+                write_line(stdout_file, line)
+            remaining_jobs = reap_jobs(
+                background_jobs,
+                display_done_only=False,
+                output_func=output_func,
+            )
+            background_jobs[:] = remaining_jobs
+        return 0
+
+    return 1
+
+
+def split_pipeline(parts):
+    """Split tokenized input into pipeline stages."""
+    stages = []
+    current = []
+
+    for part in parts:
+        if part == "|":
+            if not current:
+                return None
+            stages.append(current)
+            current = []
+        else:
+            current.append(part)
+
+    if not current:
+        return None
+
+    stages.append(current)
+    return stages
+
+
+def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, shell_error=sys.stderr.write):
+    """Run a pipeline containing external commands and/or shell builtins."""
+    stages = split_pipeline(parts)
+    if not stages or len(stages) < 2:
         shell_error("shell: invalid pipeline\n")
         return
 
-    left_path = find_executable(left_parts[0])
-    if not left_path:
-        shell_error(f"{left_parts[0]}: command not found\n")
-        return
+    pids = []
+    pipe_fds = []
+    previous_read_fd = None
 
-    right_path = find_executable(right_parts[0])
-    if not right_path:
-        shell_error(f"{right_parts[0]}: command not found\n")
-        return
+    for index, stage_parts in enumerate(stages):
+        if index < len(stages) - 1:
+            read_fd, write_fd = os.pipe()
+            pipe_fds.extend([read_fd, write_fd])
+        else:
+            read_fd = write_fd = None
 
-    left_process = None
-    right_process = None
-
-    try:
-        left_process = subprocess.Popen(
-            [left_parts[0]] + left_parts[1:],
-            executable=left_path,
-            stdout=subprocess.PIPE,
-            stderr=stderr_handle,
-        )
-
-        right_process = subprocess.Popen(
-            [right_parts[0]] + right_parts[1:],
-            executable=right_path,
-            stdin=left_process.stdout,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-        )
-
-        # The parent must close its copy of the pipe's write/read handle so the
-        # right command can see EOF and the left command can receive SIGPIPE if
-        # the right command exits early. This is important for `tail -f | head`.
-        if left_process.stdout:
-            left_process.stdout.close()
-
-        right_process.wait()
-
-        # In cases like `tail -f file | head -n 5`, the right command exits
-        # once it has enough input, but the left command can otherwise keep
-        # following the file. Clean it up so the shell returns to the prompt.
         try:
-            left_process.wait(timeout=0.1)
-        except subprocess.TimeoutExpired:
-            left_process.terminate()
-            try:
-                left_process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                left_process.kill()
-                left_process.wait()
-
-    except Exception as e:
-        shell_error(f"shell: pipeline execution error: {e}\n")
-
-        for process in (right_process, left_process):
-            if process and process.poll() is None:
-                process.terminate()
+            pid = os.fork()
+        except OSError as e:
+            shell_error(f"shell: fork error: {e}\n")
+            for fd in pipe_fds:
                 try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                    os.close(fd)
+                except OSError:
+                    pass
+            for child_pid in pids:
+                try:
+                    os.kill(child_pid, 15)
+                except OSError:
+                    pass
+            return
+
+        if pid == 0:
+            try:
+                if previous_read_fd is not None:
+                    os.dup2(previous_read_fd, 0)
+
+                if write_fd is not None:
+                    os.dup2(write_fd, 1)
+                elif stdout_handle is not None:
+                    os.dup2(stdout_handle.fileno(), 1)
+
+                if stderr_handle is not None:
+                    os.dup2(stderr_handle.fileno(), 2)
+
+                for fd in pipe_fds:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                if previous_read_fd is not None:
+                    try:
+                        os.close(previous_read_fd)
+                    except OSError:
+                        pass
+
+                command_name = stage_parts[0]
+                if command_name in BUILTINS:
+                    stdout_file = os.fdopen(1, "w", closefd=False)
+                    stderr_file = os.fdopen(2, "w", closefd=False)
+                    try:
+                        status = run_builtin(
+                            stage_parts,
+                            stdout_file=stdout_file,
+                            stderr_file=stderr_file,
+                            background_jobs=background_jobs,
+                        )
+                    except SystemExit as e:
+                        status = int(e.code or 0)
+                    try:
+                        stdout_file.flush()
+                        stderr_file.flush()
+                    except BrokenPipeError:
+                        pass
+                    os._exit(status)
+
+                found_path = find_executable(command_name)
+                if not found_path:
+                    os.write(2, f"{command_name}: command not found\n".encode())
+                    os._exit(127)
+
+                os.execv(found_path, stage_parts)
+            except BrokenPipeError:
+                os._exit(0)
+            except Exception as e:
+                try:
+                    os.write(2, f"shell: pipeline execution error: {e}\n".encode())
+                except Exception:
+                    pass
+                os._exit(1)
+
+        pids.append(pid)
+
+        # Parent process: close the pipe ends it no longer needs.  This is what
+        # allows downstream commands to see EOF and upstream commands to receive
+        # SIGPIPE when a later stage exits early.
+        if previous_read_fd is not None:
+            try:
+                os.close(previous_read_fd)
+            except OSError:
+                pass
+
+        if write_fd is not None:
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+
+        previous_read_fd = read_fd
+
+    if previous_read_fd is not None:
+        try:
+            os.close(previous_read_fd)
+        except OSError:
+            pass
+
+    # Wait for the final stage first.  This keeps `tail -f file | head -n 5`
+    # from hanging the shell after `head` has already produced its required output.
+    try:
+        os.waitpid(pids[-1], 0)
+    except ChildProcessError:
+        pass
+
+    remaining_pids = pids[:-1]
+    for pid in remaining_pids:
+        try:
+            waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+            if waited_pid == 0:
+                os.kill(pid, 15)
+                try:
+                    os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+        except ProcessLookupError:
+            pass
+        except ChildProcessError:
+            pass
 
 
 def reap_jobs(background_jobs, display_done_only=True, output_func=print):
@@ -497,15 +675,17 @@ def main():
             if stderr_handle:
                 stderr_handle.close()
 
-        # Handle simple two-command external pipelines before builtins.
+        # Handle pipelines before the normal builtin/external command paths.
+        # Pipeline stages may be builtins or external commands.
         if "|" in parts:
             if run_in_background:
                 shell_error("shell: background pipelines are not supported\n")
             else:
-                run_external_pipeline(
+                run_pipeline(
                     parts,
                     stdout_handle=stdout_handle,
                     stderr_handle=stderr_handle,
+                    background_jobs=background_jobs,
                     shell_error=shell_error,
                 )
 
