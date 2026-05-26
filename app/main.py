@@ -363,8 +363,17 @@ def main():
 
             background_jobs = running_jobs
 
-            for job in background_jobs:
-                shell_print(format_job(job))
+            current_job_number = background_jobs[-1]["job_number"] if background_jobs else None
+            previous_job_number = background_jobs[-2]["job_number"] if len(background_jobs) > 1 else None
+
+            for job in sorted(background_jobs, key=lambda item: item["job_number"]):
+                if job["job_number"] == current_job_number:
+                    marker = "+"
+                elif job["job_number"] == previous_job_number:
+                    marker = "-"
+                else:
+                    marker = " "
+                shell_print(format_job(job, marker))
 
             close_handles()
             continue
