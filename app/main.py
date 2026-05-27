@@ -382,7 +382,7 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
 
     if command_name == "history":
         if command_history is not None:
-            for index, command in enumerate(command_history, start=1):
+            for index, command in iter_history_entries(command_history, parts):
                 write_line(stdout_file, f"{index:5}  {command}")
         return 0
 
@@ -409,6 +409,19 @@ def split_pipeline(parts):
     stages.append(current)
     return stages
 
+def iter_history_entries(command_history, parts):
+    start_index = 0
+
+    if len(parts) > 1:
+        try:
+            limit = int(parts[1])
+            if limit <= 0:
+                return []
+            start_index = max(0, len(command_history) - limit)
+        except ValueError:
+            start_index = 0
+
+    return enumerate(command_history[start_index:], start=start_index + 1)
 
 def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, shell_error=sys.stderr.write):
     """Run a pipeline containing external commands and/or shell builtins."""
@@ -719,7 +732,7 @@ def main():
             continue
 
         elif command_name == "history":
-            for index, command in enumerate(command_history, start=1):
+            for index, command in iter_history_entries(command_history, parts):
                 shell_print(f"{index:5}  {command}")
 
             close_handles()
