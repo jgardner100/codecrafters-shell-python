@@ -331,7 +331,14 @@ def write_history_file(path, command_history):
             history_file.write(command + "\n")
 
 
-def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None):
+def append_history_file(path, command_history, start_index=0):
+    """Append history entries from start_index onward to a history file."""
+    with open(path, "a") as history_file:
+        for command in command_history[start_index:]:
+            history_file.write(command + "\n")
+
+
+def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None, history_append_index=None):
     """Run a shell builtin and return its exit status.
 
     This is shared by the normal command path and by child processes created for
@@ -430,6 +437,19 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
             if len(parts) > 2:
                 try:
                     write_history_file(parts[2], command_history)
+                    if history_append_index is not None:
+                        history_append_index[0] = len(command_history)
+                except OSError as e:
+                    write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
+            return 0
+
+        if len(parts) > 1 and parts[1] == "-a":
+            if len(parts) > 2:
+                try:
+                    start_index = history_append_index[0] if history_append_index is not None else 0
+                    append_history_file(parts[2], command_history, start_index)
+                    if history_append_index is not None:
+                        history_append_index[0] = len(command_history)
                 except OSError as e:
                     write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
             return 0
@@ -462,7 +482,7 @@ def split_pipeline(parts):
     return stages
 
 
-def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, shell_error=sys.stderr.write):
+def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, history_append_index=None, shell_error=sys.stderr.write):
     """Run a pipeline containing external commands and/or shell builtins."""
     stages = split_pipeline(parts)
     if not stages or len(stages) < 2:
@@ -531,6 +551,7 @@ def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=
                             stderr_file=stderr_file,
                             background_jobs=background_jobs,
                             command_history=command_history,
+                            history_append_index=history_append_index,
                         )
                     except SystemExit as e:
                         status = int(e.code or 0)
@@ -638,6 +659,7 @@ def reap_jobs(background_jobs, display_done_only=True, output_func=print):
 def main():
     background_jobs = []
     command_history = []
+    history_append_index = [0]
     while True:
         # Reap any completed background jobs before showing the next prompt.
         # This prints Done lines after the previous command output and before
@@ -749,6 +771,7 @@ def main():
                     stderr_handle=stderr_handle,
                     background_jobs=background_jobs,
                     command_history=command_history,
+                    history_append_index=history_append_index,
                     shell_error=shell_error,
                 )
 
@@ -785,6 +808,18 @@ def main():
                 if len(parts) > 2:
                     try:
                         write_history_file(parts[2], command_history)
+                        history_append_index[0] = len(command_history)
+                    except OSError as e:
+                        shell_error(f"history: {parts[2]}: {e.strerror}\n")
+
+                close_handles()
+                continue
+
+            if len(parts) > 1 and parts[1] == "-a":
+                if len(parts) > 2:
+                    try:
+                        append_history_file(parts[2], command_history, history_append_index[0])
+                        history_append_index[0] = len(command_history)
                     except OSError as e:
                         shell_error(f"history: {parts[2]}: {e.strerror}\n")
 
