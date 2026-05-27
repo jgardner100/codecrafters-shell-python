@@ -324,6 +324,13 @@ def read_history_file(path, command_history):
                 command_history.append(command)
 
 
+def write_history_file(path, command_history):
+    """Write all in-memory history entries to a file with a trailing newline."""
+    with open(path, "w") as history_file:
+        for command in command_history:
+            history_file.write(command + "\n")
+
+
 def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None):
     """Run a shell builtin and return its exit status.
 
@@ -415,6 +422,14 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
             if len(parts) > 2:
                 try:
                     read_history_file(parts[2], command_history)
+                except OSError as e:
+                    write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
+            return 0
+
+        if len(parts) > 1 and parts[1] == "-w":
+            if len(parts) > 2:
+                try:
+                    write_history_file(parts[2], command_history)
                 except OSError as e:
                     write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
             return 0
@@ -760,6 +775,16 @@ def main():
                 if len(parts) > 2:
                     try:
                         read_history_file(parts[2], command_history)
+                    except OSError as e:
+                        shell_error(f"history: {parts[2]}: {e.strerror}\n")
+
+                close_handles()
+                continue
+
+            if len(parts) > 1 and parts[1] == "-w":
+                if len(parts) > 2:
+                    try:
+                        write_history_file(parts[2], command_history)
                     except OSError as e:
                         shell_error(f"history: {parts[2]}: {e.strerror}\n")
 
