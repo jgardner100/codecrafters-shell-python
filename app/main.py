@@ -350,6 +350,17 @@ def quote_declare_value(value):
     )
 
 
+def is_valid_shell_identifier(name):
+    """Return True when name is a valid shell variable identifier."""
+    if not name:
+        return False
+
+    if not (name[0].isalpha() or name[0] == "_"):
+        return False
+
+    return all(char.isalnum() or char == "_" for char in name[1:])
+
+
 def run_declare_builtin(parts, shell_variables, stdout_file=sys.stdout, stderr_file=sys.stderr):
     """Implement the subset of declare needed by the challenge."""
     if shell_variables is None:
@@ -372,8 +383,11 @@ def run_declare_builtin(parts, shell_variables, stdout_file=sys.stdout, stderr_f
             continue
 
         variable_name, value = assignment.split("=", 1)
-        if variable_name:
-            shell_variables[variable_name] = value
+        if not is_valid_shell_identifier(variable_name):
+            write_line(stderr_file, f"declare: `{assignment}': not a valid identifier")
+            continue
+
+        shell_variables[variable_name] = value
 
     return 0
 
