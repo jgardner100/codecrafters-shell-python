@@ -660,6 +660,26 @@ def main():
     background_jobs = []
     command_history = []
     history_append_index = [0]
+
+    histfile_path = os.environ.get("HISTFILE")
+    if histfile_path:
+        try:
+            read_history_file(histfile_path, command_history)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # Startup history loading should not prevent the shell from running.
+            pass
+        history_append_index[0] = len(command_history)
+
+    def save_histfile_on_exit():
+        if not histfile_path:
+            return
+        try:
+            write_history_file(histfile_path, command_history)
+        except OSError:
+            pass
+
     while True:
         # Reap any completed background jobs before showing the next prompt.
         # This prints Done lines after the previous command output and before
@@ -670,6 +690,7 @@ def main():
             user_input = input("$ ")
         except (EOFError, KeyboardInterrupt):
             print()
+            save_histfile_on_exit()
             break
 
         user_input = user_input.strip()
@@ -781,6 +802,7 @@ def main():
         # Handle Builtin Commands
         if command_name == "exit":
             close_handles()
+            save_histfile_on_exit()
             sys.exit(0)
 
         elif command_name == "jobs":
