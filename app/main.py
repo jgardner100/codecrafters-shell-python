@@ -244,9 +244,9 @@ def iter_history_entries(command_history, parts):
     history_len = len(command_history)
     limit = history_len
     
-    if len(parts) > i_offset := 1:
+    if len(parts) > 1:
         try:
-            val = int(parts[i_offset])
+            val = int(parts[1])
             if val > 0:
                 limit = min(val, history_len)
         except ValueError:
@@ -303,7 +303,6 @@ def run_builtin(command_name, parts, stdout_file, stderr_file, command_history=N
         return 0
 
     elif command_name == "complete":
-        # complete command behavior logic validation fallback for pipeline stages
         return 0
 
     elif command_name == "jobs":
@@ -311,13 +310,11 @@ def run_builtin(command_name, parts, stdout_file, stderr_file, command_history=N
             clean_completed_jobs(background_jobs)
             for job in background_jobs:
                 write_line(stdout_file, f"[{job['job_number']}] {job['pid']} {job['status']} \t {job['command']}")
-            # Drop finished tracking markers cleanly
             background_jobs[:] = [j for j in background_jobs if j["status"] == "Running"]
         return 0
 
     elif command_name == "history":
         if command_history is not None:
-            # Handle history -r inside pipeline fallback definitions
             if len(parts) > 2 and parts[1] == "-r":
                 history_file = parts[2]
                 try:
@@ -399,7 +396,6 @@ def run_pipeline(stages, command_history, background_jobs):
     processes = []
     
     for idx, stage_str in enumerate(stages):
-        # Extract individual stage redirection configuration rules
         raw_parts = parse_command(stage_str.strip())
         parts = []
         
@@ -442,23 +438,17 @@ def run_pipeline(stages, command_history, background_jobs):
             
         command_name = parts[0]
         
-        # Fork target process stage
         pid = os.fork()
         if pid == 0:
-            # CHILD PROCESS CONTEXT
-            # Wire up stdin link descriptor
             if idx > 0:
                 os.dup2(pipes[idx-1][0], sys.stdin.fileno())
-            # Wire up stdout link descriptor
             if idx < num_commands - 1:
                 os.dup2(pipes[idx][1], sys.stdout.fileno())
                 
-            # Close all copied pipe copies inside child frame context
             for p in pipes:
                 os.close(p[0])
                 os.close(p[1])
                 
-            # Set up file level streams redirections overrides
             if stdout_redirection_file:
                 fd = os.open(stdout_redirection_file, os.O_WRONLY | os.O_CREAT | (os.O_TRUNC if stdout_mode == "w" else os.O_APPEND), 0o644)
                 os.dup2(fd, sys.stdout.fileno())
@@ -469,7 +459,6 @@ def run_pipeline(stages, command_history, background_jobs):
                 os.dup2(fd, sys.stderr.fileno())
                 os.close(fd)
                 
-            # Process Execution Routing: Builtins vs Path Executables
             if command_name in BUILTINS:
                 code = run_builtin(command_name, parts, sys.stdout, sys.stderr, command_history, background_jobs)
                 sys.exit(code)
@@ -485,15 +474,12 @@ def run_pipeline(stages, command_history, background_jobs):
                     sys.stderr.write(f"{command_name}: command not found\n")
                     sys.exit(127)
         else:
-            # PARENT PROCESS CONTEXT
             processes.append(pid)
             
-    # Close pipe resources in parent loop frame
     for p in pipes:
         os.close(p[0])
         os.close(p[1])
         
-    # Wait for completion of all pipeline children stages
     for pid in processes:
         os.waitpid(pid, 0)
 
@@ -522,24 +508,20 @@ def main():
         except Exception:
             break
 
-        # Scan for sequential background operator tasks symbol tokens
         run_in_background = False
         if command_stripped.endswith("&"):
             run_in_background = True
             command_stripped = command_stripped[:-1].strip()
 
-        # Route multi stage pipelines through custom execution subshell architecture
         pipeline_stages = parse_pipeline(command_stripped)
         if len(pipeline_stages) > 1:
             run_pipeline(pipeline_stages, command_history, background_jobs)
             continue
 
-        # Single command parsing track
         raw_parts = parse_command(command_stripped)
         if not raw_parts:
             continue
 
-        # Extract output redirection operators if specified
         parts = []
         stdout_file_path = None
         stderr_file_path = None
@@ -579,7 +561,6 @@ def main():
 
         command_name = parts[0]
 
-        # Conditionally override file descriptors
         stdout_handle = sys.stdout
         stderr_handle = sys.stderr
         opened_stdout = None
@@ -606,7 +587,6 @@ def main():
             if opened_stderr:
                 opened_stderr.close()
 
-        # Handle Internal Builtins
         if command_name == "exit":
             close_handles()
             sys.exit(0)
@@ -648,7 +628,6 @@ def main():
             continue
 
         elif command_name == "complete":
-            # Handles: complete -C <script> <cmd>, complete -r <cmd>, and complete -p <cmd>
             if len(parts) > 2 and parts[1] == "-C":
                 script_path = parts[2]
                 target_cmd = parts[3] if len(parts) > 3 else ""
@@ -677,7 +656,6 @@ def main():
             continue
 
         elif command_name == "history":
-            # --- Check for history -r <filename> ---
             if len(parts) > 2 and parts[1] == "-r":
                 history_file = parts[2]
                 try:
@@ -692,14 +670,12 @@ def main():
                 close_handles()
                 continue
 
-            # Standard history printing fallback
             for index, command__item in iter_history_entries(command_history, parts):
                 shell_print(f"{index:5}  {command__item}")
 
             close_handles()
             continue
 
-        # Handle External Executables
         found_path = find_executable(command_name)
         if found_path:
             try:
