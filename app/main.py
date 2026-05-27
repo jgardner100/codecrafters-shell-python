@@ -422,6 +422,8 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
         return 0
 
     if command_name == "declare":
+        if len(parts) > 2 and parts[1] == "-p":
+            write_line(stderr_file, f"declare: {parts[2]}: not found")
         return 0
 
     if command_name == "history":
@@ -819,6 +821,9 @@ def main():
             continue
 
         elif command_name == "declare":
+            if len(parts) > 2 and parts[1] == "-p":
+                shell_error(f"declare: {parts[2]}: not found\n")
+
             close_handles()
             continue
 
