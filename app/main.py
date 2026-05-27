@@ -338,7 +338,46 @@ def append_history_file(path, command_history, start_index=0):
             history_file.write(command + "\n")
 
 
-def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None, history_append_index=None):
+
+def quote_declare_value(value):
+    """Quote a shell variable value for `declare -p` output."""
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
+
+
+def run_declare_builtin(parts, shell_variables, stdout_file=sys.stdout, stderr_file=sys.stderr):
+    """Implement the subset of declare needed by the challenge."""
+    if shell_variables is None:
+        shell_variables = {}
+
+    if len(parts) > 1 and parts[1] == "-p":
+        if len(parts) < 3:
+            return 0
+
+        variable_name = parts[2]
+        if variable_name in shell_variables:
+            value = quote_declare_value(shell_variables[variable_name])
+            write_line(stdout_file, f'declare -- {variable_name}="{value}"')
+        else:
+            write_line(stderr_file, f"declare: {variable_name}: not found")
+        return 0
+
+    for assignment in parts[1:]:
+        if "=" not in assignment:
+            continue
+
+        variable_name, value = assignment.split("=", 1)
+        if variable_name:
+            shell_variables[variable_name] = value
+
+    return 0
+
+def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None, history_append_index=None, shell_variables=None):
     """Run a shell builtin and return its exit status.
 
     This is shared by the normal command path and by child processes created for
@@ -422,9 +461,12 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
         return 0
 
     if command_name == "declare":
-        if len(parts) > 2 and parts[1] == "-p":
-            write_line(stderr_file, f"declare: {parts[2]}: not found")
-        return 0
+        return run_declare_builtin(
+            parts,
+            shell_variables,
+            stdout_file=stdout_file,
+            stderr_file=stderr_file,
+        )
 
     if command_name == "history":
         if command_history is None:
@@ -487,7 +529,7 @@ def split_pipeline(parts):
     return stages
 
 
-def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, history_append_index=None, shell_error=sys.stderr.write):
+def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, history_append_index=None, shell_variables=None, shell_error=sys.stderr.write):
     """Run a pipeline containing external commands and/or shell builtins."""
     stages = split_pipeline(parts)
     if not stages or len(stages) < 2:
@@ -557,6 +599,7 @@ def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=
                             background_jobs=background_jobs,
                             command_history=command_history,
                             history_append_index=history_append_index,
+                            shell_variables=shell_variables,
                         )
                     except SystemExit as e:
                         status = int(e.code or 0)
@@ -665,6 +708,7 @@ def main():
     background_jobs = []
     command_history = []
     history_append_index = [0]
+    shell_variables = {}
 
     histfile_path = os.environ.get("HISTFILE")
     if histfile_path:
@@ -798,6 +842,7 @@ def main():
                     background_jobs=background_jobs,
                     command_history=command_history,
                     history_append_index=history_append_index,
+                    shell_variables=shell_variables,
                     shell_error=shell_error,
                 )
 
@@ -821,8 +866,12 @@ def main():
             continue
 
         elif command_name == "declare":
-            if len(parts) > 2 and parts[1] == "-p":
-                shell_error(f"declare: {parts[2]}: not found\n")
+            run_declare_builtin(
+                parts,
+                shell_variables,
+                stdout_file=stdout_handle or sys.stdout,
+                stderr_file=stderr_handle or sys.stderr,
+            )
 
             close_handles()
             continue
