@@ -154,11 +154,11 @@ try:
 except Exception:
     pass
 
-# Force immediate auto-suffix behavior suppression safely depending on the dynamic engine platform
-try:
-    readline.parse_and_bind("set add-suffix off")
-except Exception:
-    pass
+# JG: Force immediate auto-suffix behavior suppression safely depending on the dynamic engine platform
+#try:
+#    readline.parse_and_bind("set add-suffix off")
+#except Exception:
+#    pass
 
 if "libedit" in getattr(readline, "__doc__", "").lower():
     try:
