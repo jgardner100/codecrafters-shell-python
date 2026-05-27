@@ -364,7 +364,7 @@ def is_valid_shell_identifier(name):
 
 
 def expand_parameter_word(word, shell_variables):
-    """Expand simple $NAME shell parameters inside one parsed word."""
+    """Expand $NAME and ${NAME} shell parameters inside one parsed word."""
     result = []
     i = 0
 
@@ -376,9 +376,26 @@ def expand_parameter_word(word, shell_variables):
             i += 1
             continue
 
-        # Only the simple $NAME form is supported here.  A valid NAME starts
-        # with a letter or underscore and continues with letters, digits or
-        # underscores.  Other '$' uses are left unchanged for later stages.
+        # Braced form: ${NAME}. The closing brace marks exactly where the
+        # variable name ends, so literal text can be appended immediately after
+        # the expansion, e.g. ${Item}_id -> widget_id.
+        if i + 1 < len(word) and word[i + 1] == "{":
+            closing_brace = word.find("}", i + 2)
+            if closing_brace == -1:
+                result.append(char)
+                i += 1
+                continue
+
+            variable_name = word[i + 2:closing_brace]
+            if is_valid_shell_identifier(variable_name):
+                result.append(shell_variables.get(variable_name, ""))
+            else:
+                result.append(word[i:closing_brace + 1])
+            i = closing_brace + 1
+            continue
+
+        # Simple form: $NAME. A valid NAME starts with a letter or underscore
+        # and continues with letters, digits or underscores.
         if i + 1 >= len(word) or not (word[i + 1].isalpha() or word[i + 1] == "_"):
             result.append(char)
             i += 1
@@ -396,7 +413,7 @@ def expand_parameter_word(word, shell_variables):
 
 
 def expand_parameters(parts, shell_variables):
-    """Expand simple $NAME parameters in parsed command parts."""
+    """Expand $NAME and ${NAME} parameters in parsed command parts."""
     return [expand_parameter_word(part, shell_variables) for part in parts]
 
 def run_declare_builtin(parts, shell_variables, stdout_file=sys.stdout, stderr_file=sys.stderr):
