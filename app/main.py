@@ -361,6 +361,44 @@ def is_valid_shell_identifier(name):
     return all(char.isalnum() or char == "_" for char in name[1:])
 
 
+
+
+def expand_parameter_word(word, shell_variables):
+    """Expand simple $NAME shell parameters inside one parsed word."""
+    result = []
+    i = 0
+
+    while i < len(word):
+        char = word[i]
+
+        if char != "$":
+            result.append(char)
+            i += 1
+            continue
+
+        # Only the simple $NAME form is supported here.  A valid NAME starts
+        # with a letter or underscore and continues with letters, digits or
+        # underscores.  Other '$' uses are left unchanged for later stages.
+        if i + 1 >= len(word) or not (word[i + 1].isalpha() or word[i + 1] == "_"):
+            result.append(char)
+            i += 1
+            continue
+
+        j = i + 2
+        while j < len(word) and (word[j].isalnum() or word[j] == "_"):
+            j += 1
+
+        variable_name = word[i + 1:j]
+        result.append(shell_variables.get(variable_name, ""))
+        i = j
+
+    return "".join(result)
+
+
+def expand_parameters(parts, shell_variables):
+    """Expand simple $NAME parameters in parsed command parts."""
+    return [expand_parameter_word(part, shell_variables) for part in parts]
+
 def run_declare_builtin(parts, shell_variables, stdout_file=sys.stdout, stderr_file=sys.stderr):
     """Implement the subset of declare needed by the challenge."""
     if shell_variables is None:
@@ -806,6 +844,10 @@ def main():
             run_in_background = True
             parts = parts[:-1]
 
+        if not parts:
+            continue
+
+        parts = expand_parameters(parts, shell_variables)
         if not parts:
             continue
 
