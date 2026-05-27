@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Pipeline builtins patch: pipeline stages dispatch shell builtins before PATH lookup.
-BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete", "jobs"}
+BUILTINS = {"exit", "echo", "type", "pwd", "cd", "complete", "jobs", "history"}
 AUTOCOMPLETE_COMMANDS = ["echo", "exit"]
 
 # In-memory storage mapping command names to their registered completion script paths
@@ -297,7 +297,7 @@ def write_line(file_obj, text):
         pass
 
 
-def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None):
+def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None):
     """Run a shell builtin and return its exit status.
 
     This is shared by the normal command path and by child processes created for
@@ -380,6 +380,12 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
             background_jobs[:] = remaining_jobs
         return 0
 
+    if command_name == "history":
+        if command_history is not None:
+            for index, command in enumerate(command_history, start=1):
+                write_line(stdout_file, f"{index:5}  {command}")
+        return 0
+
     return 1
 
 
@@ -404,7 +410,7 @@ def split_pipeline(parts):
     return stages
 
 
-def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, shell_error=sys.stderr.write):
+def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, shell_error=sys.stderr.write):
     """Run a pipeline containing external commands and/or shell builtins."""
     stages = split_pipeline(parts)
     if not stages or len(stages) < 2:
@@ -472,6 +478,7 @@ def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=
                             stdout_file=stdout_file,
                             stderr_file=stderr_file,
                             background_jobs=background_jobs,
+                            command_history=command_history,
                         )
                     except SystemExit as e:
                         status = int(e.code or 0)
@@ -578,6 +585,7 @@ def reap_jobs(background_jobs, display_done_only=True, output_func=print):
 
 def main():
     background_jobs = []
+    command_history = []
     while True:
         # Reap any completed background jobs before showing the next prompt.
         # This prints Done lines after the previous command output and before
@@ -593,6 +601,8 @@ def main():
         user_input = user_input.strip()
         if not user_input:
             continue
+
+        command_history.append(user_input)
 
         raw_parts = parse_command(user_input)
         if not raw_parts:
@@ -686,6 +696,7 @@ def main():
                     stdout_handle=stdout_handle,
                     stderr_handle=stderr_handle,
                     background_jobs=background_jobs,
+                    command_history=command_history,
                     shell_error=shell_error,
                 )
 
@@ -703,6 +714,13 @@ def main():
                 display_done_only=False,
                 output_func=shell_print,
             )
+
+            close_handles()
+            continue
+
+        elif command_name == "history":
+            for index, command in enumerate(command_history, start=1):
+                shell_print(f"{index:5}  {command}")
 
             close_handles()
             continue
