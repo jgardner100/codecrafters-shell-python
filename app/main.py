@@ -413,8 +413,22 @@ def expand_parameter_word(word, shell_variables):
 
 
 def expand_parameters(parts, shell_variables):
-    """Expand $NAME and ${NAME} parameters in parsed command parts."""
-    return [expand_parameter_word(part, shell_variables) for part in parts]
+    """Expand $NAME and ${NAME} parameters in parsed command parts.
+
+    Unset variables expand to an empty string. If a parsed word becomes empty
+    after expansion, drop it so commands do not receive a blank argument for
+    cases like `${missing}`. Literal text around an unset expansion is kept, so
+    `${missing}end` still becomes `end`.
+    """
+    expanded_parts = []
+
+    for part in parts:
+        expanded = expand_parameter_word(part, shell_variables)
+        if expanded == "":
+            continue
+        expanded_parts.append(expanded)
+
+    return expanded_parts
 
 def run_declare_builtin(parts, shell_variables, stdout_file=sys.stdout, stderr_file=sys.stderr):
     """Implement the subset of declare needed by the challenge."""
