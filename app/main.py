@@ -297,48 +297,7 @@ def write_line(file_obj, text):
         pass
 
 
-def iter_history_entries(command_history, parts):
-    """Yield numbered history entries, optionally limited to the last n commands."""
-    if command_history is None:
-        return []
-
-    start_index = 0
-    if len(parts) > 1:
-        try:
-            limit = int(parts[1])
-            if limit <= 0:
-                return []
-            start_index = max(0, len(command_history) - limit)
-        except ValueError:
-            start_index = 0
-
-    return enumerate(command_history[start_index:], start=start_index + 1)
-
-
-def read_history_file(path, command_history):
-    """Append non-empty lines from a history file to in-memory history."""
-    with open(path, "r") as history_file:
-        for line in history_file:
-            command = line.rstrip("\n")
-            if command:
-                command_history.append(command)
-
-
-def write_history_file(path, command_history):
-    """Write all in-memory history entries to a file with a trailing newline."""
-    with open(path, "w") as history_file:
-        for command in command_history:
-            history_file.write(command + "\n")
-
-
-def append_history_file(path, command_history, start_index=0):
-    """Append history entries from start_index onward to a history file."""
-    with open(path, "a") as history_file:
-        for command in command_history[start_index:]:
-            history_file.write(command + "\n")
-
-
-def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None, history_append_index=None):
+def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, background_jobs=None, command_history=None):
     """Run a shell builtin and return its exit status.
 
     This is shared by the normal command path and by child processes created for
@@ -422,40 +381,9 @@ def run_builtin(parts, stdout_file=sys.stdout, stderr_file=sys.stderr, backgroun
         return 0
 
     if command_name == "history":
-        if command_history is None:
-            return 0
-
-        if len(parts) > 1 and parts[1] == "-r":
-            if len(parts) > 2:
-                try:
-                    read_history_file(parts[2], command_history)
-                except OSError as e:
-                    write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
-            return 0
-
-        if len(parts) > 1 and parts[1] == "-w":
-            if len(parts) > 2:
-                try:
-                    write_history_file(parts[2], command_history)
-                    if history_append_index is not None:
-                        history_append_index[0] = len(command_history)
-                except OSError as e:
-                    write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
-            return 0
-
-        if len(parts) > 1 and parts[1] == "-a":
-            if len(parts) > 2:
-                try:
-                    start_index = history_append_index[0] if history_append_index is not None else 0
-                    append_history_file(parts[2], command_history, start_index)
-                    if history_append_index is not None:
-                        history_append_index[0] = len(command_history)
-                except OSError as e:
-                    write_line(stderr_file, f"history: {parts[2]}: {e.strerror}")
-            return 0
-
-        for index, command in iter_history_entries(command_history, parts):
-            write_line(stdout_file, f"{index:5}  {command}")
+        if command_history is not None:
+            for index, command in enumerate(command_history, start=1):
+                write_line(stdout_file, f"{index:5}  {command}")
         return 0
 
     return 1
@@ -482,7 +410,7 @@ def split_pipeline(parts):
     return stages
 
 
-def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, history_append_index=None, shell_error=sys.stderr.write):
+def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=None, command_history=None, shell_error=sys.stderr.write):
     """Run a pipeline containing external commands and/or shell builtins."""
     stages = split_pipeline(parts)
     if not stages or len(stages) < 2:
@@ -551,7 +479,6 @@ def run_pipeline(parts, stdout_handle=None, stderr_handle=None, background_jobs=
                             stderr_file=stderr_file,
                             background_jobs=background_jobs,
                             command_history=command_history,
-                            history_append_index=history_append_index,
                         )
                     except SystemExit as e:
                         status = int(e.code or 0)
@@ -659,27 +586,6 @@ def reap_jobs(background_jobs, display_done_only=True, output_func=print):
 def main():
     background_jobs = []
     command_history = []
-    history_append_index = [0]
-
-    histfile_path = os.environ.get("HISTFILE")
-    if histfile_path:
-        try:
-            read_history_file(histfile_path, command_history)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            # Startup history loading should not prevent the shell from running.
-            pass
-        history_append_index[0] = len(command_history)
-
-    def save_histfile_on_exit():
-        if not histfile_path:
-            return
-        try:
-            write_history_file(histfile_path, command_history)
-        except OSError:
-            pass
-
     while True:
         # Reap any completed background jobs before showing the next prompt.
         # This prints Done lines after the previous command output and before
@@ -690,7 +596,6 @@ def main():
             user_input = input("$ ")
         except (EOFError, KeyboardInterrupt):
             print()
-            save_histfile_on_exit()
             break
 
         user_input = user_input.strip()
@@ -792,7 +697,6 @@ def main():
                     stderr_handle=stderr_handle,
                     background_jobs=background_jobs,
                     command_history=command_history,
-                    history_append_index=history_append_index,
                     shell_error=shell_error,
                 )
 
@@ -802,7 +706,6 @@ def main():
         # Handle Builtin Commands
         if command_name == "exit":
             close_handles()
-            save_histfile_on_exit()
             sys.exit(0)
 
         elif command_name == "jobs":
@@ -816,39 +719,7 @@ def main():
             continue
 
         elif command_name == "history":
-            if len(parts) > 1 and parts[1] == "-r":
-                if len(parts) > 2:
-                    try:
-                        read_history_file(parts[2], command_history)
-                    except OSError as e:
-                        shell_error(f"history: {parts[2]}: {e.strerror}\n")
-
-                close_handles()
-                continue
-
-            if len(parts) > 1 and parts[1] == "-w":
-                if len(parts) > 2:
-                    try:
-                        write_history_file(parts[2], command_history)
-                        history_append_index[0] = len(command_history)
-                    except OSError as e:
-                        shell_error(f"history: {parts[2]}: {e.strerror}\n")
-
-                close_handles()
-                continue
-
-            if len(parts) > 1 and parts[1] == "-a":
-                if len(parts) > 2:
-                    try:
-                        append_history_file(parts[2], command_history, history_append_index[0])
-                        history_append_index[0] = len(command_history)
-                    except OSError as e:
-                        shell_error(f"history: {parts[2]}: {e.strerror}\n")
-
-                close_handles()
-                continue
-
-            for index, command in iter_history_entries(command_history, parts):
+            for index, command in enumerate(command_history, start=1):
                 shell_print(f"{index:5}  {command}")
 
             close_handles()
